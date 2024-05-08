@@ -3,7 +3,6 @@
 #include <TinyGPS++.h>
 #include <TM1637.h>
 #include <TM16xxDisplay.h>
-#include <Comparator.h>
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -26,12 +25,8 @@ byte timeVectCount = 0;   // RTC割り込みは、500ms毎にしているので�
 
 bool isSecondDisp = true;
 bool isBright = false;
-time_t prevTime = 0;
 static byte colLedHighVal = 100;
 static byte colLedLowVal = 10;
-static byte displayIntensityLow = 1;
-static byte displayIntensityHigh = 4;
-static byte comparatorDacref = 128;
 
 void setup()
 {
@@ -40,16 +35,13 @@ void setup()
   pinMode(COL_LED_PIN1, OUTPUT);
   pinMode(COL_LED_PIN2, OUTPUT);
   GpsOn();
-  display.setIntensity(displayIntensityLow);
+  display.setIntensity(1);
 
   //シリアルポート開始
   Serial.begin(9600);
 
   //タイマー割り込み設定
   RTC_init();
-
-  //コンパレータ初期化
-  initComparator();
 
   //SD開始
   if (!sdFat.begin(SD_CS_PIN, SPI_FULL_SPEED))
@@ -78,34 +70,33 @@ void setup()
   //set_zone関数の引数は秒
   set_zone(currentOffsetMinutes * 60);
 
+  while (1)
+  {
+    ;
+  }
+
 }
 
 void loop()
 {
-  time_t nowTime = time(NULL);
-  if (nowTime != prevTime)
-  {
-    displayTime();
-    prevTime = nowTime;
-  }
+  //set_zone関数の引数は秒
+  set_zone(currentOffsetMinutes * 60);
 
-  if (Comparator.read())
-  {
-    isBright = false;
-  }
-  else
-  {
-    isBright = true;
-  }
+  //システム時間の更新
+  setSystemTimeFromGPS();
 
-  if (isBright)
-  {
-    display.setIntensity(displayIntensityHigh);
-  }
-  else
-  {
-    display.setIntensity(displayIntensityLow);
-  }
+  //タイムゾーンの設定
+
+  //オフセットの手動設定
+  //  swState = getIsUpSwitchPressed();
+  //  if (swState == SwitchPressedState::ShortPressed) {
+  //    currentOffsetMinutes += 15;
+  //  }
+  //  swState = getIsDownSwitchPressed();
+  //  if (swState == SwitchPressedState::ShortPressed) {
+  //    currentOffsetMinutes -= 15;
+  //  }
+
 }
 
 // 7segLEDに現在時刻を表示します。
@@ -178,22 +169,19 @@ ISR(RTC_CNT_vect)
   else
   {
     timeVectCount = 0;
-    system_tick();
+    timeTick();
     setColLED(true);
   }
 }
 
-void initComparator()
+// システム時間を一秒すすめて、時間表示する
+void timeTick()
 {
-  Comparator.input_p = comparator::in_p::in3;
-  Comparator.input_n = comparator::in_n::dacref;
-  Comparator.reference = comparator::ref::vref_vdd;
-  Comparator.dacref = comparatorDacref;
-  Comparator.hysteresis = comparator::hyst::medium;
-  Comparator.output = comparator::out::disable;
+  //システム時間を一秒すすめる。
+  system_tick();
 
-  Comparator.init();
-  Comparator.start();
+  //時間表示
+  displayTime();
 }
 
 void setColLED(bool isOn)
@@ -203,7 +191,7 @@ void setColLED(bool isOn)
     if (isBright)
     {
       analogWrite(COL_LED_PIN1, colLedHighVal);
-      //analogWrite(COL_LED_PIN2, colLedHighVal);
+      analogWrite(COL_LED_PIN2, colLedHighVal);
     }
     else
     {
@@ -240,7 +228,7 @@ void setSystemTimeFromGPS()
       /* RTCカウンタ初期化。１PPSと同期させる */
       RTC.CNT = 0;
       timeVectCount = 0;
-
+      
       struct tm gps_time;
       gps_time.tm_sec = gps.time.second();
       gps_time.tm_min = gps.time.minute();
